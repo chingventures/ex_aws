@@ -14,12 +14,36 @@ defmodule ExAws.InstanceMeta do
 
   def request(config, url) do
     case config.http_client.request(:get, url) do
-      {:ok, %{body: body}} -> body
+      {:ok, %{status_code: 200, body: body}} ->
+        body
+      {:ok, %{status_code: status_code}} ->
+        raise """
+        Instance Meta Error: HTTP response status code #{inspect status_code}
+
+        Please check AWS EC2 IAM role.
+        """
+      error ->
+        raise """
+        Instance Meta Error: #{inspect error}
+
+        You tried to access the AWS EC2 instance meta, but it could not be reached.
+        This happens most often when trying to access it from your local computer,
+        which happens when environment variables are not set correctly prompting
+        ExAws to fallback to the Instance Meta.
+
+        Please check your key config and make sure they're configured correctly:
+
+        For Example:
+        ```
+        ExAws.Config.new(:s3)
+        ExAws.Config.new(:dynamodb)
+        ```
+        """
     end
   end
 
   def instance_role(config) do
-    ExAws.InstanceMeta.request(config, "/iam/security-credentials/")
+    ExAws.InstanceMeta.request(config, @meta_path_root <> "/iam/security-credentials/")
   end
 
   def task_role_credentials(config) do
@@ -37,9 +61,9 @@ defmodule ExAws.InstanceMeta do
 
   def security_credentials(config) do
     result = case task_role_credentials(config) do
-	       nil -> instance_role_credentials(config)
-	       credentials -> credentials
-	     end
+      nil -> instance_role_credentials(config)
+      credentials -> credentials
+    end
 
     %{
       access_key_id: result["AccessKeyId"],

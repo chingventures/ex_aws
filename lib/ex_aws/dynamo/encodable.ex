@@ -9,6 +9,7 @@ end
 defimpl ExAws.Dynamo.Encodable, for: Atom do
   def encode(true, _),  do: %{"BOOL" => "true"}
   def encode(false, _), do: %{"BOOL" => "false"}
+  def encode(nil, _), do: %{"NULL" => "true"}
   def encode(value, _), do: %{"S" => value |> Atom.to_string}
 end
 
@@ -77,8 +78,6 @@ defimpl ExAws.Dynamo.Encodable, for: Map do
   def do_encode(map, _), do: do_encode(map)
   def do_encode(map) do
     Enum.reduce(map, %{}, fn
-      ({_, nil}, map) -> map
-      ({_, []}, map)  -> map
       ({_, ""}, map)  -> map
 
       ({k, v}, map) when is_binary(k) ->
@@ -98,47 +97,40 @@ end
 
 defimpl ExAws.Dynamo.Encodable, for: List do
   alias ExAws.Dynamo.Encodable
-  def encode([], _), do: []
+  def encode([], _), do: %{"L"  => []}
 
   @doc """
   Dynamodb offers typed sets and L, a generic list of typed attributes.
-
-  If all items in the list have the same dynamo type, This will return the
-  corrosponding Dynamo type set ie
-  [%{"N" => 1},%{"N" => 2}] #=> %{"NS" => [1,2]}
-
-  Otherwise, it will use the generic list type ie
-  [%{"N" => 1},%{"S" => "Foo"}] #=> %{"L" => [%{"N" => 1},%{"S" => "Foo"}]}
   """
   def encode(list, _) do
-    {typed_values, list_type} = list
-    |> Enum.map_reduce(:first,
-        fn
-        value, :first ->
-          typed_value = Encodable.encode(value, [])
-          dynamo_type = typed_value |> Map.keys() |> hd()
-          {typed_value, dynamo_type}
-
-        value, dynamo_type ->
-          typed_value = Encodable.encode(value, [])
-          new_dynamo_type = typed_value |> Map.keys() |> hd()
-          if dynamo_type == new_dynamo_type do
-            {typed_value, dynamo_type}
-          else
-            {typed_value, "generic"}
-          end
-        end)
-    case list_type do
-      "N" ->
-        values = typed_values |> Enum.map(fn %{"N" => value} -> value end)
-        %{"NS" => values}
-      "S" ->
-        values = typed_values |> Enum.map(fn %{"S" => value} -> value end)
-        %{"SS" => values}
-      "B" ->
-        values = typed_values |> Enum.map(fn %{"B" => value} -> value end)
-        %{"BS" => values}
-      _ -> %{"L"  => typed_values}
+    typed_values = for value <- list do
+      Encodable.encode(value, [])
     end
+
+    %{"L"  => typed_values}
+  end
+end
+
+defimpl ExAws.Dynamo.Encodable, for: MapSet do
+  def encode(mapset, _) do
+    cond do
+      MapSet.size(mapset) == 0 ->
+        raise "Cannot determine a proper data type for an empty MapSet"
+      Enum.all?(mapset, &is_number/1) ->
+        %{"NS" => number_set_to_list(mapset)}
+      Enum.all?(mapset, &is_binary/1) ->
+        %{"SS" => MapSet.to_list(mapset)}
+      true ->
+        raise "All elements in a MapSet must be only numbers or only strings"
+    end
+  end
+
+  defp number_set_to_list(number_mapset) do
+    number_mapset
+    |> MapSet.to_list
+    |> Enum.map(fn
+      (n) when is_integer(n) -> Integer.to_string(n)
+      (n) when is_float(n)   -> Float.to_string(n)
+    end)
   end
 end

@@ -35,7 +35,7 @@ defmodule ExAws.S3 do
 
   ## More high level functionality
 
-  Flow makes some high level flows so easy you don't need explicit ExAws support.
+  Task.async_stream makes some high level flows so easy you don't need explicit ExAws support.
 
   For example, here is how to concurrently upload many files.
 
@@ -48,17 +48,15 @@ defmodule ExAws.S3 do
   paths = %{"path/to/src0" => "path/to/dest0", "path/to/src1" => "path/to/dest1"}
 
   paths
-  |> Flow.from_enumerable(stages: 10, max_demand: 2)
-  |> Flow.each(upload_file)
-  |> Flow.run
+  |> Task.async_stream(upload_file, max_concurrency: 10)
+  |> Stream.run
   ```
   """
 
   import ExAws.S3.Utils
   alias ExAws.S3.Parsers
-  alias Experimental.Flow
 
-  @type acl_opts :: [{:acl, canned_acl} | grant]
+  @type acl_opts :: {:acl, canned_acl} | grant
   @type grant :: {:grant_read, grantee}
     | {:grant_read_acp, grantee}
     | {:grant_write_acp, grantee}
@@ -83,9 +81,9 @@ defmodule ExAws.S3 do
     | customer_encryption_opts
 
   @type presigned_url_opts :: [
-    expires_in: integer,
-    virtual_host: boolean,
-    query_params: [{:key, binary}]
+      {:expires_in, integer}
+    | {:virtual_host, boolean}
+    | {:query_params, [{binary, binary}]}
   ]
 
   @type amz_meta_opts :: [{atom, binary} | {binary, binary}, ...]
@@ -96,7 +94,9 @@ defmodule ExAws.S3 do
   @spec list_buckets() :: ExAws.Operation.S3.t
   @spec list_buckets(opts :: Keyword.t) :: ExAws.Operation.S3.t
   def list_buckets(opts \\ []) do
-    request(:get, "", "/", params: opts)
+    request(:get, "", "/", [params: opts],
+      parser: &ExAws.S3.Parsers.parse_all_my_buckets_result/1
+    )
   end
 
   @doc "Delete a bucket"
@@ -148,10 +148,21 @@ defmodule ExAws.S3 do
     {:encoding_type, binary} |
     {:max_keys, 0..1000}
   ]
+
   @doc """
   List objects in bucket
 
   Can be streamed.
+
+  ## Examples
+  ```
+  S3.list_objects("my-bucket") |> ExAws.request
+
+  S3.list_objects("my-bucket") |> ExAws.stream!
+  S3.list_objects("my-bucket", delimiter: "/", prefix: "backup") |> ExAws.stream!
+  S3.list_objects("my-bucket", prefix: "some/inner/location/path") |> ExAws.stream!
+  S3.list_objects("my-bucket", max_keys: 5, encoding_type: "url") |> ExAws.stream!
+  ```
   """
   @spec list_objects(bucket :: binary) :: ExAws.Operation.S3.t
   @spec list_objects(bucket :: binary, opts :: list_objects_opts) :: ExAws.Operation.S3.t
@@ -260,32 +271,28 @@ defmodule ExAws.S3 do
     request(:get, bucket, "/", [resource: "uploads", params: params], %{parser: &Parsers.parse_list_multipart_uploads/1})
   end
 
-  @doc "Creates a bucket. Same as create_bucket/2"
+  @doc "Creates a bucket in the specified region"
   @spec put_bucket(bucket :: binary, region :: binary) :: ExAws.Operation.S3.t
-  def put_bucket(bucket, region, opts \\ []) do
+  def put_bucket(bucket, region, opts \\ [])
+  def put_bucket(bucket, "", opts), do: put_bucket(bucket, "us-east-1", opts)
+  def put_bucket(bucket, region, opts) do
     headers = opts
     |> Map.new
     |> format_acl_headers
 
-    # us-east-1 region needs to be an empty string, cause AWS S3 API sucks.
-    region = if region == "us-east-1", do: "", else: region
+    body = region |> put_bucket_body
 
-    body = """
-    <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-      <LocationConstraint>#{region}</LocationConstraint>
-    </CreateBucketConfiguration>
-    """
     request(:put, bucket, "/", body: body, headers: headers)
   end
 
   @doc "Update or create a bucket bucket access control"
-  @spec put_bucket_acl(bucket :: binary, opts :: acl_opts) :: ExAws.Operation.S3.t
+  @spec put_bucket_acl(bucket :: binary, opts :: [acl_opts]) :: ExAws.Operation.S3.t
   def put_bucket_acl(bucket, grants) do
     request(:put, bucket, "/", headers: format_acl_headers(grants))
   end
 
   @doc "Update or create a bucket CORS policy"
-  @spec put_bucket_cors(bucket :: binary, cors_config :: %{}) :: ExAws.Operation.S3.t
+  @spec put_bucket_cors(bucket :: binary, cors_config :: map()) :: ExAws.Operation.S3.t
   def put_bucket_cors(bucket, cors_rules) do
     rules = cors_rules
     |> Enum.map(&build_cors_rule/1)
@@ -300,41 +307,41 @@ defmodule ExAws.S3 do
   end
 
   @doc "Update or create a bucket lifecycle configuration"
-  @spec put_bucket_lifecycle(bucket :: binary, lifecycle_config :: %{}) :: no_return
+  @spec put_bucket_lifecycle(bucket :: binary, lifecycle_config :: map()) :: no_return
   def put_bucket_lifecycle(bucket, _livecycle_config) do
     raise "not yet implemented"
     request(:put, bucket, "/")
   end
 
   @doc "Update or create a bucket policy configuration"
-  @spec put_bucket_policy(bucket :: binary, policy :: %{}) :: ExAws.Operation.S3.t
+  @spec put_bucket_policy(bucket :: binary, policy :: map()) :: ExAws.Operation.S3.t
   def put_bucket_policy(bucket, policy) do
     request(:put, bucket, "/", resource: "policy", body: policy)
   end
 
   @doc "Update or create a bucket logging configuration"
-  @spec put_bucket_logging(bucket :: binary, logging_config :: %{}) :: no_return
+  @spec put_bucket_logging(bucket :: binary, logging_config :: map()) :: no_return
   def put_bucket_logging(bucket, _logging_config) do
     raise "not yet implemented"
     request(:put, bucket, "/")
   end
 
   @doc "Update or create a bucket notification configuration"
-  @spec put_bucket_notification(bucket :: binary, notification_config :: %{}) :: no_return
+  @spec put_bucket_notification(bucket :: binary, notification_config :: map()) :: no_return
   def put_bucket_notification(bucket, _notification_config) do
     raise "not yet implemented"
     request(:put, bucket, "/")
   end
 
   @doc "Update or create a bucket replication configuration"
-  @spec put_bucket_replication(bucket :: binary, replication_config :: %{}) :: no_return
+  @spec put_bucket_replication(bucket :: binary, replication_config :: map()) :: no_return
   def put_bucket_replication(bucket, _replication_config) do
     raise "not yet implemented"
     request(:put, bucket, "/")
   end
 
   @doc "Update or create a bucket tagging configuration"
-  @spec put_bucket_tagging(bucket :: binary, tags :: %{}) :: no_return
+  @spec put_bucket_tagging(bucket :: binary, tags :: map()) :: no_return
   def put_bucket_tagging(bucket, _tags) do
     raise "not yet implemented"
     request(:put, bucket, "/")
@@ -394,8 +401,8 @@ defmodule ExAws.S3 do
 
     body = [
       ~s(<?xml version="1.0" encoding="UTF-8"?>),
-      quiet,
       "<Delete>",
+      quiet,
       objects_xml,
       "</Delete>"
     ]
@@ -503,21 +510,6 @@ defmodule ExAws.S3 do
   |> ExAws.request! #=> :done
   ```
 
-  ## Uploading a flow
-
-  GenStage Flows can also be uploaded directly to S3. To ensure all parts of
-  the file are assembled in the correct order when the upload is finalized, the
-  producer must emit events with the following format:
-  `{binary, one_based_index}`. Each binary will be uploaded as a chunk and
-  must be at least 5 megabytes in size.
-  ```
-  enumerable = ["hello world"] |> Stream.with_index(1)
-
-  Flow.from_enumerable(enumerable, stages: 4, max_demand: 2)
-  |> S3.upload("my-bucket", "test.txt")
-  |> ExAws.request! #=> :done
-  ```
-
   ## Options
 
   These options are specific to this function
@@ -530,7 +522,7 @@ defmodule ExAws.S3 do
 
   """
   @spec upload(
-    source :: Enumerable.t | Flow.t,
+    source :: Enumerable.t,
     bucket :: String.t,
     path :: String.t,
     opts :: upload_opts) :: __MODULE__.Upload.t
@@ -654,7 +646,7 @@ defmodule ExAws.S3 do
   end
 
   @doc "Create or update an object's access control FIXME"
-  @spec put_object_acl(bucket :: binary, object :: binary, acl :: acl_opts) :: ExAws.Operation.S3.t
+  @spec put_object_acl(bucket :: binary, object :: binary, acl :: [acl_opts]) :: ExAws.Operation.S3.t
   def put_object_acl(bucket, object, acl) do
     headers = acl |> Map.new |> format_acl_headers
     request(:put, bucket, object, headers: headers, resource: "acl")
@@ -874,7 +866,7 @@ defmodule ExAws.S3 do
   `:query_params` to a list of `{"key", "value"}` pairs. Useful if you are uploading parts of
   a multipart upload directly from the browser.
   """
-  @spec presigned_url(config :: %{}, http_method :: atom, bucket :: binary, object :: binary, opts :: presigned_url_opts) :: {:ok, binary} | {:error, binary}
+  @spec presigned_url(config :: map, http_method :: atom, bucket :: binary, object :: binary, opts :: presigned_url_opts) :: {:ok, binary} | {:error, binary}
   @one_week 60 * 60 * 24 * 7
   def presigned_url(config, http_method, bucket, object, opts \\ []) do
     expires_in = Keyword.get(opts, :expires_in, 3600)
@@ -885,8 +877,17 @@ defmodule ExAws.S3 do
       false ->
         url = url_to_sign(bucket, object, config, virtual_host)
         datetime = :calendar.universal_time
-        {:ok, ExAws.Auth.presigned_url(http_method, url, :s3, datetime, config, expires_in, query_params)}
+        ExAws.Auth.presigned_url(http_method, url, :s3, datetime, config, expires_in, query_params)
     end
+  end
+
+  defp put_bucket_body("us-east-1"), do: ""
+  defp put_bucket_body(region) do
+    """
+    <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <LocationConstraint>#{region}</LocationConstraint>
+    </CreateBucketConfiguration>
+    """
   end
 
   defp url_to_sign(bucket, object, config, virtual_host) do

@@ -26,7 +26,7 @@ defmodule ExAws.Dynamo do
   # Retrieve the user by email and decode it as a User struct.
   result = Dynamo.get_item("Users", %{email: user.email})
   |> ExAws.request!
-  |> Dynamo.Decoder.decode(as: User)
+  |> Dynamo.decode_item(as: User)
 
   assert user == result
   ```
@@ -171,7 +171,7 @@ defmodule ExAws.Dynamo do
     index_name: "my-global-index",
     key_schema: [%{
       attribute_name: "email",
-      attribute_type: "HASH",
+      key_type: "HASH",
     }],
     provisioned_throughput: %{
       read_capacity_units: 1,
@@ -181,7 +181,7 @@ defmodule ExAws.Dynamo do
       projection_type: "KEYS_ONLY",
     }
   }]
-  create_table("TestUsers", [id: :hash], %{id: :string}, 1, 1, secondary_index, [])
+  create_table("TestUsers", [id: :hash], %{id: :string, email: :string}, 1, 1, secondary_index, [])
   ```
 
   """
@@ -325,7 +325,7 @@ defmodule ExAws.Dynamo do
     |> build_opts
     |> Map.merge(%{"TableName" => name})
 
-    request(:query, data)
+    request(:query, data, %{stream_builder: &ExAws.Dynamo.Lazy.stream_query(name, opts, &1)})
   end
 
   @doc """
@@ -399,8 +399,8 @@ defmodule ExAws.Dynamo do
     {:return_item_collection_metrics, return_item_collection_metrics_vals } |
     {:return_values, return_values_vals}
   ]
-  @spec put_item(table_name :: table_name, record :: %{}) :: ExAws.Operation.JSON.t
-  @spec put_item(table_name :: table_name, record :: %{}, opts :: put_item_opts) :: ExAws.Operation.JSON.t
+  @spec put_item(table_name :: table_name, record :: map()) :: ExAws.Operation.JSON.t
+  @spec put_item(table_name :: table_name, record :: map(), opts :: put_item_opts) :: ExAws.Operation.JSON.t
   def put_item(name, record, opts \\ []) do
     data = opts
     |> build_opts
@@ -423,7 +423,7 @@ defmodule ExAws.Dynamo do
   """
   @type write_item :: [
     [delete_request: [key: primary_key]] |
-    [put_request: [item: %{}]]
+    [put_request: [item: map()]]
   ]
   @type batch_write_item_opts :: [
     {:return_consumed_capacity, return_consumed_capacity_vals} |

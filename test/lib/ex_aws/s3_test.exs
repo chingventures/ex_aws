@@ -15,6 +15,7 @@ defmodule ExAws.S3Test do
         "x-amz-acl" => "public-read",
         "x-amz-server-side-encryption" => "AES256",
         "x-amz-storage-class" => "spicy",
+        "content-md5" => "asdf",
         "x-amz-meta-foo" => "sqiggles"},
       path: "object.json",
       http_method: :put
@@ -23,10 +24,52 @@ defmodule ExAws.S3Test do
     assert expected == S3.put_object("bucket", "object.json", "data",
       content_encoding: "application/json",
       storage_class: "spicy",
+      content_md5: "asdf",
       acl: :public_read,
       encryption: "AES256",
       meta: [foo: "sqiggles"]
     )
+  end
+
+  test "#put_bucket with non-us-east-1 region" do
+    region = "not-us-east-1"
+    bucket = "new.bucket"
+    expected = %Operation.S3{
+      body: """
+      <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+        <LocationConstraint>#{region}</LocationConstraint>
+      </CreateBucketConfiguration>
+      """,
+      bucket: bucket,
+      path: "/",
+      http_method: :put
+    }
+
+    assert expected == S3.put_bucket(bucket, region)
+  end
+
+  test "#put_bucket with us-east-1 region" do
+    bucket = "new.bucket"
+    expected = %Operation.S3{
+      body: "",
+      bucket: bucket,
+      path: "/",
+      http_method: :put
+    }
+
+    assert expected == S3.put_bucket(bucket, "us-east-1")
+  end
+
+  test "#put_bucket with empty region" do
+    bucket = "new.bucket"
+    expected = %Operation.S3{
+      body: "",
+      bucket: bucket,
+      path: "/",
+      http_method: :put
+    }
+
+    assert expected == S3.put_bucket(bucket, "")
   end
 
   test "#put_object_copy" do

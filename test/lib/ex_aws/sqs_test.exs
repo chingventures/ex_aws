@@ -117,6 +117,34 @@ defmodule ExAws.SQSTest do
                          ]).params
   end
 
+  test "#send_message for FIFO queue" do
+    expected = %{"Action" => "SendMessage",
+                 "MessageBody" => "This is the message body.",
+                 "DelaySeconds" => 30,
+                 "MessageAttribute.1.Name" => "TestStringAttribute",
+                 "MessageAttribute.1.Value.StringValue" => "testing!",
+                 "MessageAttribute.1.Value.DataType" => "String",
+                 "MessageGroupId" => "TestGroupId",
+                 "MessageDeduplicationId" => "TestDedupId"
+                 }
+
+    assert expected == SQS.send_message(
+                         "982071696186/test_queue",
+                         "This is the message body.",
+                         [
+                           delay_seconds: 30,
+                           message_attributes: [
+                             %{
+                               name: "TestStringAttribute",
+                               data_type: :string,
+                               value: "testing!"
+                             }
+                           ],
+                           message_group_id: "TestGroupId",
+                           message_deduplication_id: "TestDedupId"
+                         ]).params
+  end
+
   test "#send_message_batch" do
     expected = %{"Action" => "SendMessageBatch",
                  "SendMessageBatchRequestEntry.1.Id" => "test_message_1",
@@ -144,7 +172,8 @@ defmodule ExAws.SQSTest do
     assert expected == SQS.send_message_batch(
                          "982071696186/test_queue",
                          [
-                           [ id: "test_message_1",
+                           [
+                             id: "test_message_1",
                              message_body: "This is the message body.",
                              delay_seconds: 30,
                              message_attributes: [
@@ -186,6 +215,59 @@ defmodule ExAws.SQSTest do
                        ).params
   end
 
+  test "#send_message_batch for FIFO queue" do
+    expected = %{"Action" => "SendMessageBatch",
+                 "SendMessageBatchRequestEntry.1.Id" => "test_message_1",
+                 "SendMessageBatchRequestEntry.1.MessageBody" => "This is the message body.",
+                 "SendMessageBatchRequestEntry.1.DelaySeconds" => 30,
+                 "SendMessageBatchRequestEntry.1.MessageAttribute.1.Name" => "TestStringAttribute",
+                 "SendMessageBatchRequestEntry.1.MessageAttribute.1.Value.StringValue" => "testing!",
+                 "SendMessageBatchRequestEntry.1.MessageAttribute.1.Value.DataType" => "String",
+                 "SendMessageBatchRequestEntry.1.MessageGroupId" => "TestGroupId",
+                 "SendMessageBatchRequestEntry.1.MessageDeduplicationId" => "TestDedupId",
+                 "SendMessageBatchRequestEntry.2.Id" => "test_message_2",
+                 "SendMessageBatchRequestEntry.2.MessageBody" => "This is the second message body.",
+                 "SendMessageBatchRequestEntry.2.MessageAttribute.1.Name" => "TestAnotherStringAttribute",
+                 "SendMessageBatchRequestEntry.2.MessageAttribute.1.Value.StringValue" => "still testing!",
+                 "SendMessageBatchRequestEntry.2.MessageAttribute.1.Value.DataType" => "String",
+                 "SendMessageBatchRequestEntry.2.MessageGroupId" => "TestGroupId",
+                 "SendMessageBatchRequestEntry.2.MessageDeduplicationId" => "TestDedupId"
+                 }
+
+    assert expected == SQS.send_message_batch(
+                         "982071696186/test_queue.fifo",
+                         [
+                           [
+                             id: "test_message_1",
+                             message_body: "This is the message body.",
+                             delay_seconds: 30,
+                             message_attributes: [
+                               %{
+                                 name: "TestStringAttribute",
+                                 data_type: :string,
+                                 value: "testing!"
+                               }
+                             ],
+                             message_group_id: "TestGroupId",
+                             message_deduplication_id: "TestDedupId"
+                           ],
+                           [
+                             id: "test_message_2",
+                             message_body: "This is the second message body.",
+                             message_attributes: [
+                               %{
+                                 name: "TestAnotherStringAttribute",
+                                 data_type: :string,
+                                 value: "still testing!"
+                               }
+                             ],
+                             message_group_id: "TestGroupId",
+                             message_deduplication_id: "TestDedupId"
+                           ]
+                         ]
+                       ).params
+  end
+
   test "#receive_message" do
     expected = %{"Action" => "ReceiveMessage"}
     assert expected == SQS.receive_message("982071696186/test_queue").params
@@ -194,10 +276,10 @@ defmodule ExAws.SQSTest do
     assert expected == SQS.receive_message("982071696186/test_queue", attribute_names: :all,
                                                                       max_number_of_messages: 5).params
 
-    expected = %{"Action" => "ReceiveMessage", "AttributeName.1" => "SenderId", "AttributeName.2" => "ApproximateReceiveCount", "VisibilityTimeout" => 1000, "WaitTimeout" => 20}
+    expected = %{"Action" => "ReceiveMessage", "AttributeName.1" => "SenderId", "AttributeName.2" => "ApproximateReceiveCount", "VisibilityTimeout" => 1000, "WaitTimeSeconds" => 20}
     assert expected == SQS.receive_message("982071696186/test_queue", attribute_names: [:sender_id, :approximate_receive_count],
                                                                       visibility_timeout: 1000,
-                                                                      wait_timeout: 20).params
+                                                                      wait_time_seconds: 20).params
   end
 
   test "#receive_message can set the message attributes to all" do

@@ -1,15 +1,8 @@
 defmodule ExAws.SNS.ParserTest do
   use ExUnit.Case, async: true
+  import Support.ParserHelpers
 
   alias ExAws.SNS.Parsers
-
-  def to_success(doc) do
-    {:ok, %{body: doc}}
-  end
-
-  def to_error(doc) do
-    {:error, {:http_error, 403, %{body: doc}}}
-  end
 
   test "#parsing a list_topics response" do
     rsp = """
@@ -349,6 +342,24 @@ defmodule ExAws.SNS.ParserTest do
     assert parsed_doc[:request_id] == "c4407779-24a4-56fa-982c-3d927f93a775"
   end
 
+  test "#parsing a confirm subscription response" do
+    rsp = """
+      <ConfirmSubscriptionResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+        <ConfirmSubscriptionResult>
+          <SubscriptionArn>arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca</SubscriptionArn>
+        </ConfirmSubscriptionResult>
+        <ResponseMetadata>
+          <RequestId>7a50221f-3774-11df-a9b7-05d48da6f042</RequestId>
+        </ResponseMetadata>
+      </ConfirmSubscriptionResponse>
+    """
+    |> to_success
+
+    {:ok, %{body: parsed_doc}} = Parsers.parse(rsp, :confirm_subscription)
+    assert parsed_doc[:subscription_arn] == "arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca"
+    assert parsed_doc[:request_id] == "7a50221f-3774-11df-a9b7-05d48da6f042"
+  end
+
   test "#parsing a list_subscriptions response" do
     rsp = """
       <ListSubscriptionsResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
@@ -420,6 +431,77 @@ defmodule ExAws.SNS.ParserTest do
     assert parsed_doc[:request_id] == "384ac68d-3775-11df-8963-01868b7c937a"
   end
 
+  test "#parsing a list_subscriptions_by_topic response" do
+    rsp = """
+      <ListSubscriptionsByTopicResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+        <ListSubscriptionsByTopicResult>
+          <Subscriptions>
+            <member>
+              <TopicArn>arn:aws:sns:us-east-1:123456789012:My-Topic</TopicArn>
+              <Protocol>email</Protocol>
+              <SubscriptionArn>arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca</SubscriptionArn>
+              <Owner>123456789012</Owner>
+              <Endpoint>example@amazon.com</Endpoint>
+            </member>
+          </Subscriptions>
+        </ListSubscriptionsByTopicResult>
+        <ResponseMetadata>
+          <RequestId>b9275252-3774-11df-9540-99d0768312d3</RequestId>
+        </ResponseMetadata>
+      </ListSubscriptionsByTopicResponse>
+    """
+    |> to_success
+
+    {:ok, %{body: parsed_doc}} = Parsers.parse(rsp, :list_subscriptions_by_topic)
+    assert parsed_doc[:subscriptions] == [
+      %{
+        owner: "123456789012",
+        endpoint: "example@amazon.com",
+        protocol: "email",
+        subscription_arn: "arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca",
+        topic_arn: "arn:aws:sns:us-east-1:123456789012:My-Topic"
+      }
+    ]
+    assert parsed_doc[:next_token] == ""
+    assert parsed_doc[:request_id] == "b9275252-3774-11df-9540-99d0768312d3"
+  end
+
+  test "#parsing a list_subscriptions_by_topic response with a next token" do
+    rsp = """
+      <ListSubscriptionsByTopicResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+        <ListSubscriptionsByTopicResult>
+          <Subscriptions>
+            <member>
+              <TopicArn>arn:aws:sns:us-east-1:123456789012:My-Topic</TopicArn>
+              <Protocol>email</Protocol>
+              <SubscriptionArn>arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca</SubscriptionArn>
+              <Owner>123456789012</Owner>
+              <Endpoint>example@amazon.com</Endpoint>
+            </member>
+          </Subscriptions>
+          <NextToken>123456789</NextToken>
+        </ListSubscriptionsByTopicResult>
+        <ResponseMetadata>
+          <RequestId>b9275252-3774-11df-9540-99d0768312d3</RequestId>
+        </ResponseMetadata>
+      </ListSubscriptionsByTopicResponse>
+    """
+    |> to_success
+
+    {:ok, %{body: parsed_doc}} = Parsers.parse(rsp, :list_subscriptions_by_topic)
+    assert parsed_doc[:subscriptions] == [
+      %{
+        owner: "123456789012",
+        endpoint: "example@amazon.com",
+        protocol: "email",
+        subscription_arn: "arn:aws:sns:us-east-1:123456789012:My-Topic:80289ba6-0fd4-4079-afb4-ce8c8260f0ca",
+        topic_arn: "arn:aws:sns:us-east-1:123456789012:My-Topic"
+      }
+    ]
+    assert parsed_doc[:next_token] == "123456789"
+    assert parsed_doc[:request_id] == "b9275252-3774-11df-9540-99d0768312d3"
+  end
+
   test "#parsing an unsubscribe response" do
     rsp = """
       <UnsubscribeResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
@@ -482,7 +564,7 @@ defmodule ExAws.SNS.ParserTest do
         <ResponseMetadata>
           <RequestId>a8763b99-33a7-11df-a9b7-05d48da6f042</RequestId>
         </ResponseMetadata>
-      </SetSubscriptionAttributesResponse> 
+      </SetSubscriptionAttributesResponse>
     """
     |> to_success
 
@@ -552,26 +634,40 @@ defmodule ExAws.SNS.ParserTest do
     assert parsed_doc[:request_id] == "c1d2b191-353c-5a5f-8969-fbdd3900afa8"
   end
 
-  test "it should handle parsing an error" do
+  test "#parsing a list_phone_numbers_opted_out response" do
     rsp = """
-    <?xml version=\"1.0\"?>
-    <ErrorResponse xmlns=\"http://queue.amazonaws.com/doc/2012-11-05/\">
-      <Error>
-        <Type>Sender</Type>
-        <Code>ExpiredToken</Code>
-        <Message>The security token included in the request is expired</Message>
-        <Detail/>
-      </Error>
-      <RequestId>f7ac5905-2fb6-5529-a86d-09628dae67f4</RequestId>
-    </ErrorResponse>
+      <ListPhoneNumbersOptedOutResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+        <ListPhoneNumbersOptedOutResult>
+          <nextToken>AAHewfYBWTBhfb4//E2ANouP</nextToken>
+            <phoneNumbers>
+              <member>+15005550006</member>
+            </phoneNumbers>
+          </ListPhoneNumbersOptedOutResult>
+        <ResponseMetadata>
+          <RequestId>db6d6256-6b98-5656-8798-33d0de3d3b47</RequestId>
+        </ResponseMetadata>
+      </ListPhoneNumbersOptedOutResponse>
     """
-    |> to_error
+    |> to_success
 
-    {:error, {:http_error, 403, err}} = Parsers.parse(rsp, :set_endpoint_attributes)
+    {:ok, %{body: parsed_doc}} = Parsers.parse(rsp, :list_phone_numbers_opted_out)
+    assert parsed_doc[:request_id] == "db6d6256-6b98-5656-8798-33d0de3d3b47"
+    assert parsed_doc[:phone_numbers] == ["+15005550006"]
+    assert parsed_doc[:next_token] == "AAHewfYBWTBhfb4//E2ANouP"
+  end
 
-    assert "f7ac5905-2fb6-5529-a86d-09628dae67f4" == err[:request_id]
-    assert "Sender" == err[:type]
-    assert "ExpiredToken" == err[:code]
-    assert "The security token included in the request is expired" == err[:message]
+  test "#parsing a opt_in_phone_number response" do
+    rsp = """
+      <OptInPhoneNumberResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+        <OptInPhoneNumberResult/>
+        <ResponseMetadata>
+          <RequestId>5839a693-c333-5df8-b06f-f71576ff9bc1</RequestId>
+        </ResponseMetadata>
+      </OptInPhoneNumberResponse>
+    """
+    |> to_success
+
+    {:ok, %{body: parsed_doc}} = Parsers.parse(rsp, :opt_in_phone_number)
+    assert parsed_doc[:request_id] == "5839a693-c333-5df8-b06f-f71576ff9bc1"
   end
 end

@@ -21,18 +21,14 @@ defmodule ExAws.Operation.S3 do
   defimpl ExAws.Operation do
 
     def perform(operation, config) do
-      bucket   = operation.bucket
       body     = operation.body
-      resource = operation.resource
-      query    = operation.params |> URI.encode_query
       headers  = operation.headers
-      path     = operation.path
       http_method = operation.http_method
 
-      url =
-        config
-        |> url(bucket, path)
-        |> add_query(resource, query)
+      url = operation
+      |> add_bucket_to_path
+      |> add_resource_to_params
+      |> ExAws.Request.Url.build(config)
 
       hashed_payload = ExAws.Auth.Utils.hash_sha256(body)
 
@@ -49,28 +45,15 @@ defmodule ExAws.Operation.S3 do
       fun.(config)
     end
 
-    def url(%{scheme: scheme, host: host}, bucket, path) do
-      [scheme, do_url(host, bucket, path)]
-      |> IO.iodata_to_binary
+    def add_bucket_to_path(operation) do
+      path = "/#{operation.bucket}/#{operation.path}" |> String.trim_leading("//")
+      operation |> Map.put(:path, path)
     end
 
-    defp do_url(host, "", path) do
-      [host, "/", no_slash(path)]
+    def add_resource_to_params( operation) do
+      params = operation.params |> Map.new |> Map.put(operation.resource, 1)
+      operation |> Map.put(:params, params)
     end
-    defp do_url(host, bucket, path) do
-      [host, "/", bucket, ensure_slash(path)]
-    end
-
-    defp no_slash("/" <> path), do: path
-    defp no_slash(path), do: path
-
-    def ensure_slash("/" <> _ = path), do: path
-    def ensure_slash(path), do:  "/" <> path
-
-    def add_query(url, "", ""),          do: url
-    def add_query(url, "", query),       do: url <> "?" <> query
-    def add_query(url, resource, ""),    do: url <> "?" <> resource
-    def add_query(url, resource, query), do: url <> "?" <> resource <> "&" <> query
   end
 end
 
@@ -79,20 +62,21 @@ defmodule ExAws.Operation.S3DeleteAllObjects do
   defstruct [
     bucket: nil,
     objects: [],
-    opts: []
+    opts: [],
+    service: :s3
   ]
 
   @type t :: %__MODULE__{}
 
   defimpl ExAws.Operation do
 
-    def perform(%{bucket: bucket, files: files, opts: opts}, config) do
-      request_fun = fn objects ->
+    def perform(%{bucket: bucket, objects: objects, opts: opts}, config) do
+      request_fun = fn objects_in_batch ->
         bucket
-        |> ExAws.S3.delete_multiple_objects(objects, opts)
+        |> ExAws.S3.delete_multiple_objects(objects_in_batch, opts)
         |> ExAws.request(config)
       end
-      delete_all_objects(request_fun, files, opts, [])
+      delete_all_objects(request_fun, objects, opts, [])
     end
 
     defp delete_all_objects(_request_fun, [], _opts, acc) do
@@ -105,12 +89,12 @@ defmodule ExAws.Operation.S3DeleteAllObjects do
       end
     end
 
-    def stream!(%{bucket: bucket, files: files, opts: opts}, config) do
-      files
+    def stream!(%{bucket: bucket, objects: objects, opts: opts}, config) do
+      objects
       |> Stream.chunk(1000, 1000, [])
-      |> Stream.flat_map(fn objects ->
+      |> Stream.flat_map(fn objects_in_batch ->
         bucket
-        |> ExAws.S3.delete_multiple_objects(objects, opts)
+        |> ExAws.S3.delete_multiple_objects(objects_in_batch, opts)
         |> ExAws.request!(config)
       end)
     end
