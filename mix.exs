@@ -3,7 +3,7 @@ defmodule ExAws.Mixfile do
 
   @version "1.0.0-rc.4"
 
-  def project do
+  def project() do
     [app: :ex_aws,
      version: @version,
      elixir: "~> 1.0",
@@ -11,15 +11,15 @@ defmodule ExAws.Mixfile do
      description: "AWS client. Currently supports Dynamo, EC2, Kinesis, Lambda, RDS, S3, SNS, SQS",
      name: "ExAws",
      source_url: "https://github.com/cargosense/ex_aws",
-     package: package,
+     package: package(),
      dialyzer: [flags: "--fullpath"],
-     deps: deps,
+     deps: deps(),
      docs: [main: "ExAws", source_ref: "v#{@version}",
        source_url: "https://github.com/cargosense/ex_aws"]
      ]
   end
 
-  def application do
+  def application() do
     [applications: [:logger, :crypto, :gen_stage],
      mod: {ExAws, []}]
   end
@@ -27,7 +27,7 @@ defmodule ExAws.Mixfile do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_),     do: ["lib",]
 
-  defp deps do
+  defp deps() do
     deps(:test_dev)
   end
 
@@ -45,7 +45,7 @@ defmodule ExAws.Mixfile do
     ]
   end
 
-  defp package do
+  defp package() do
     [description: "AWS client. Currently supports Dynamo, EC2, Kinesis, Lambda, RDS, S3, SNS, SQS",
      files: ["lib", "config", "mix.exs", "README*"],
      maintainers: ["Ben Wilson"],
